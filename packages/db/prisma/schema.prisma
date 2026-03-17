@@ -7,37 +7,123 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  createdAt DateTime @default(now())
-
-  wallet Wallet?
-  transactions Transaction[]
-}
-
-model Wallet {
-  id           String  @id @default(uuid())
-  userId       String  @unique
-  silverGrams  Float   @default(0)
-  totalInvested Float  @default(0)
-
-  user User @relation(fields: [userId], references: [id])
-}
-
-model Transaction {
-  id          String   @id @default(uuid())
-  userId      String
-  amountINR   Float
-  silverGrams Float
-  type        TransactionType
-  createdAt   DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id])
-}
+//////////////////////////////////////////////////////
+// ENUMS
+//////////////////////////////////////////////////////
 
 enum TransactionType {
   BUY
   SELL
   SIP
+}
+
+enum AssetType {
+  INR
+  SILVER
+}
+
+enum Frequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+//////////////////////////////////////////////////////
+// MODELS
+//////////////////////////////////////////////////////
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  password     String
+  createdAt    DateTime      @default(now())
+
+  wallet       Wallet?
+  transactions Transaction[]
+  sipPlans     SIPPlan[]
+}
+
+model SIPPlan {
+  id        String     @id @default(uuid())
+  userId    String
+  amount    Float
+  frequency Frequency
+  nextRun   DateTime
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Wallet {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  silverGrams   Float    @default(0)
+  totalInvested Float    @default(0)
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Transaction {
+  id          String          @id @default(uuid())
+  userId      String
+  amountINR   Float
+  silverGrams Float
+  type        TransactionType
+  createdAt   DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model LedgerEntry {
+  id        String    @id @default(uuid())
+  account   String
+  asset     AssetType
+  amount    Float
+  reference String
+  createdAt DateTime  @default(now())
+}
+
+model IdempotencyKey {
+  id        String   @id
+  createdAt DateTime @default(now())
+}
+
+model SilverPrice {
+  id        String   @id @default(uuid())
+  price     Float
+  createdAt DateTime @default(now())
+}
+
+model Activity {
+  id        String   @id @default(uuid())
+  userId    String
+  type      ActivityType
+  message   String
+  createdAt DateTime @default(now())
+}
+
+enum ActivityType {
+  BUY
+  SELL
+  SIP
+  SYSTEM
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model PortfolioSnapshot {
+  id            String   @id @default(uuid())
+  userId        String
+  silverGrams   Float
+  silverPrice   Float
+  totalValueINR Float
+  createdAt     DateTime @default(now())
 }
