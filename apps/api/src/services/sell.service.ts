@@ -2,8 +2,6 @@ import { prisma } from "@silvr/db"
 import { getSilverPrice } from "./price.service"
 import { checkIdempotency } from "./idempotency.service"
 import { logger } from "../lib/logger"
-import { createActivity } from "./activity.service"
-import { createNotification } from "./notification.service"
 import { eventBus } from "../lib/eventBus"
 import { EVENTS } from "../events/events"
 import { enqueueSellSettlement } from "./settlement.service"
@@ -48,10 +46,18 @@ export const sellSilver = async (
         throw new Error("Insufficient silver balance")
     }
 
+    logger.info({
+        event: "silver_sell_started",
+        userId,
+        grams: gramsToSell,
+        valueINR
+    })
+
     /**
      * Database transaction
+     * IMPORTANT: capture transaction
      */
-    await prisma.$transaction(async (tx) => {
+    const createdTx = await prisma.$transaction(async (tx) => {
 
         await tx.ledgerEntry.createMany({
             data: [
@@ -82,28 +88,31 @@ export const sellSilver = async (
             ]
         })
 
-        await tx.transaction.create({
+        const transaction = await tx.transaction.create({
             data: {
                 userId,
                 amountINR: valueINR,
                 silverGrams: gramsToSell,
-                type: "SELL"
+                type: "SELL",
+                status: "PENDING"
             }
         })
 
+        return transaction
     })
 
     /**
-     * Settlement job (outside DB transaction)
+     * Settlement job (pass transactionId)
      */
     await enqueueSellSettlement(
         userId,
         gramsToSell,
-        idempotencyKey
+        idempotencyKey,
+        createdTx.id
     )
 
     /**
-     * Emit events AFTER commit
+     * Emit event (listeners handle activity + notifications)
      */
     eventBus.emit(EVENTS.SILVER_SOLD, {
         userId,
@@ -111,23 +120,12 @@ export const sellSilver = async (
         valueINR
     })
 
-    await createNotification(
-        userId,
-        "Silver Sold",
-        `You sold ${gramsToSell}g silver for ₹${valueINR}`
-    )
-
-    await createActivity(
-        userId,
-        "SELL",
-        `Sold ${gramsToSell}g silver for ₹${valueINR}`
-    )
-
     logger.info({
         event: "silver_sold",
         userId,
         grams: gramsToSell,
-        valueINR
+        valueINR,
+        transactionId: createdTx.id
     })
 
     return {
