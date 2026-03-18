@@ -2,8 +2,6 @@ import { prisma } from "@silvr/db"
 import { getSilverPrice } from "./price.service"
 import { checkIdempotency } from "./idempotency.service"
 import { logger } from "../lib/logger"
-import { createActivity } from "./activity.service"
-import { createNotification } from "./notification.service"
 import { eventBus } from "../lib/eventBus"
 import { EVENTS } from "../events/events"
 import { enqueueBuySettlement } from "./settlement.service"
@@ -44,8 +42,9 @@ export const buySilver = async (
 
     /**
      * Database transaction
+     * IMPORTANT: capture created transaction
      */
-    await prisma.$transaction(async (tx) => {
+    const createdTx = await prisma.$transaction(async (tx) => {
 
         await tx.ledgerEntry.createMany({
             data: [
@@ -76,29 +75,32 @@ export const buySilver = async (
             ]
         })
 
-        await tx.transaction.create({
+        const transaction = await tx.transaction.create({
             data: {
                 userId,
                 amountINR: amount,
                 silverGrams: grams,
-                type: "BUY"
+                type: "BUY",
+                status: "PENDING"
             }
         })
 
+        return transaction
     })
 
     /**
-     * Settlement job
+     * Settlement job (use transactionId)
      */
     await enqueueBuySettlement(
         userId,
         amount,
         grams,
-        idempotencyKey
+        idempotencyKey,
+        createdTx.id
     )
 
     /**
-     * Emit event
+     * Emit event (listeners handle activity + notifications)
      */
     eventBus.emit(EVENTS.SILVER_PURCHASED, {
         userId,
@@ -106,25 +108,11 @@ export const buySilver = async (
         grams
     })
 
-    /**
-     * Notifications
-     */
-    await createNotification(
-        userId,
-        "Silver Purchased",
-        `You purchased silver worth ₹${amount}`
-    )
-
-    await createActivity(
-        userId,
-        "BUY",
-        `Bought silver worth ₹${amount}`
-    )
-
     logger.info({
         event: "silver_purchase_completed",
         userId,
-        grams
+        grams,
+        transactionId: createdTx.id
     })
 
     return grams
